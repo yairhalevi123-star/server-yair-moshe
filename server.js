@@ -2,10 +2,20 @@ import "dotenv/config";
 import express from "express";
 import { Pool } from "pg";
 import bcrypt from "bcrypt";
+import cors from "cors";
 
 const app = express();
-const port = process.env.PORT || 3000;
+app.use(cors());
 
+const port = process.env.PORT || 3000;
+const defaultTests = [
+  { title: "בדיקת דם והורמונים", category: "בדיקות דם", target_week: 7 },
+  { title: "שקיפות עורפית", category: "אולטרסאונד", target_week: 11 },
+  { title: "סקירת מערכות מוקדמת", category: "אולטרסאונד", target_week: 15 },
+  { title: "חלבון עוברי", category: "בדיקות דם", target_week: 17 },
+  { title: "סקירת מערכות מאוחרת", category: "אולטרסאונד", target_week: 22 },
+  { title: "בדיקת העמסת סוכר", category: "בדיקות דם", target_week: 24 },
+];
 // PostgreSQL connection pool
 const pool = new Pool({
   host: process.env.DB_HOST,
@@ -37,7 +47,18 @@ app.get("/api/users", async (req, res) => {
     res.status(500).send("Server error");
   }
 });
-
+app.get("/api/user/tests/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query("SELECT * FROM tests WHERE user_id = $1", [
+      id,
+    ]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server error");
+  }
+});
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
 
@@ -118,30 +139,57 @@ app.get("/api/user/status/:id", async (req, res) => {
     res.status(500).send("Server Error");
   }
 });
+app.patch("/api/user/tests/:testId", async (req, res) => {
+  const { testId } = req.params;
+  const { is_completed } = req.body;
+
+  try {
+    await pool.query("UPDATE tests SET is_completed = $1 WHERE id = $2", [
+      is_completed,
+      testId,
+    ]);
+    res.json({ message: "סטטוס הבדיקה עודכן" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("שגיאת שרת");
+  }
+});
 app.post("/api/register", async (req, res) => {
   const { name, email, password, last_period_date } = req.body;
 
   try {
-    // 1. הצפנת סיסמה
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(password, salt);
+    // התחלת טרנזקציה
+    await pool.query("BEGIN");
 
-    // 2. חישוב תאריך לידה משוער (הוספת 280 יום לתאריך המחזור)
-    const lmp = new Date(last_period_date);
-    const dueDate = new Date(lmp);
-    dueDate.setDate(lmp.getDate() + 280);
-    const formattedDueDate = dueDate.toISOString().slice(0, 10); // Format to YYYY-MM-DD
-
-    // 3. שמירה ל-Postgres
+    // 1. יצירת המשתמשת (כמו שעשית קודם)
+    const passwordHash = await bcrypt.hash(password, 10);
     const newUser = await pool.query(
-      "INSERT INTO users (name, email, password_hash, last_period_date, due_date) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-      [name, email, passwordHash, last_period_date, formattedDueDate],
+      "INSERT INTO users (name, email, password_hash, last_period_date) VALUES ($1, $2, $3, $4) RETURNING *",
+      [name, email, passwordHash, last_period_date],
     );
 
-    res.json(newUser.rows[0]);
+    const userId = newUser.rows[0].id;
+
+    // 2. לוגיקה חכמה: הזרקת בדיקות אוטומטית
+    // אנחנו רצים על המערך שהגדרנו למעלה ומכניסים כל בדיקה ל-DB
+    for (const test of defaultTests) {
+      await pool.query(
+        "INSERT INTO tests (user_id, title, category, target_week) VALUES ($1, $2, $3, $4)",
+        [userId, test.title, test.category, test.target_week],
+      );
+    }
+
+    // סיום מוצלח של הטרנזקציה
+    await pool.query("COMMIT");
+
+    res.json({
+      message: "User registered and plan created!",
+      user: newUser.rows[0],
+    });
   } catch (err) {
+    await pool.query("ROLLBACK"); // ביטול הכל במקרה של שגיאה
     console.error(err.message);
-    res.status(500).send("Server Error");
+    res.status(500).send(err.message || "Server Error");
   }
 });
 
