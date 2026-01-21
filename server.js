@@ -1,10 +1,17 @@
-import "dotenv/config";
+// ייבוא קבצים וספריות נדרשות
+// import "dotenv/config";
+import { config } from "dotenv";
 import express from "express";
 import { Pool } from "pg";
 import bcrypt from "bcrypt";
 import cors from "cors";
+import morgan from "morgan";
+import multer from "multer";
+import path from "path";
 
+config(); // טוען משתני סביבה מקובץ .env
 const app = express();
+// אפשרות CORS לשרת Express
 app.use(cors());
 
 const port = process.env.PORT || 3000;
@@ -17,12 +24,16 @@ const defaultTests = [
   { title: "בדיקת העמסת סוכר", category: "בדיקות דם", target_week: 24 },
 ];
 // PostgreSQL connection pool
+// const pool = new Pool({
+//   host: process.env.DB_HOST,
+//   port: process.env.DB_PORT,
+//   database: process.env.DB_NAME,
+//   user: process.env.DB_USER,
+//   password: process.env.DB_PASSWORD,
+// });
+
 const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: process.env.DB_PORT,
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
+  connectionString: process.env.DATABASE_URL,
 });
 
 // Test database connection
@@ -36,6 +47,7 @@ pool.connect((err, client, release) => {
 
 // Middleware
 app.use(express.json());
+app.use(morgan("dev"));
 
 // Example route to get users
 app.get("/api/users", async (req, res) => {
@@ -47,6 +59,7 @@ app.get("/api/users", async (req, res) => {
     res.status(500).send("Server error");
   }
 });
+// Route to get tests for a specific user
 app.get("/api/user/tests/:id", async (req, res) => {
   const { id } = req.params;
   try {
@@ -59,6 +72,70 @@ app.get("/api/user/tests/:id", async (req, res) => {
     res.status(500).send("Server error");
   }
 });
+
+// הגדרת מקום השמירה ושם הקובץ
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/"); // וודא שקיימת תיקייה כזו בשרת
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + "-" + file.originalname); // מניעת כפילויות בשמות
+  },
+});
+
+const upload = multer({ storage: storage });
+
+// נתיב להעלאת קובץ
+app.post("/api/upload/:userId", upload.single("document"), async (req, res) => {
+  const { userId } = req.params;
+  const filePath = req.file.path;
+  const fileName = req.file.originalname;
+
+  try {
+    await pool.query(
+      "INSERT INTO user_documents (user_id, file_name, file_path) VALUES ($1, $2, $3)",
+      [userId, fileName, filePath],
+    );
+    res.json({ message: "הקובץ הועלה בהצלחה" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("שגיאה בשמירת הקובץ");
+  }
+});
+
+// נתיב לשליפת קבצים של משתמשת ספציפית (אבטחה!)
+app.get("/api/documents/:userId", async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const result = await pool.query(
+      "SELECT * FROM user_documents WHERE user_id = $1",
+      [userId],
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).send("שגיאה בשליפת קבצים");
+  }
+});
+
+// נתיב להוספת לוג יומי
+app.post("/api/logs/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const { weight, water_intake, mood, notes } = req.body;
+  const log_date = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+
+  try {
+    await pool.query(
+      "INSERT INTO logs (user_id, log_date, weight, water_intake, mood, notes) VALUES ($1, $2, $3, $4, $5, $6)",
+      [userId, log_date, weight, water_intake, mood, notes],
+    );
+    res.json({ message: "הלוג נשמר בהצלחה" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("שגיאה בשמירת הלוג");
+  }
+});
+
+// Login route
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
 
@@ -67,7 +144,6 @@ app.post("/api/login", async (req, res) => {
     const userResult = await pool.query(
       "SELECT * FROM users WHERE email = $1",
       [email],
-      console.log(email),
     );
 
     if (userResult.rows.length === 0) {
@@ -81,6 +157,7 @@ app.post("/api/login", async (req, res) => {
     const isPasswordValid = await bcrypt.compare(password, user.password_hash);
 
     if (!isPasswordValid) {
+      // למען האבטחה, עדיף לא להגיד "הסיסמה שגויה" אלא הודעה כללית
       return res.status(401).json({ message: "אימייל או סיסמה שגויים" });
     }
 
@@ -101,6 +178,7 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
+// Route to get pregnancy status for a specific user
 app.get("/api/user/status/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -189,7 +267,7 @@ app.post("/api/register", async (req, res) => {
   } catch (err) {
     await pool.query("ROLLBACK"); // ביטול הכל במקרה של שגיאה
     console.error(err.message);
-    res.status(500).send(err.message || "Server Error");
+    res.status(500).send("Server Error");
   }
 });
 
