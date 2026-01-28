@@ -280,8 +280,8 @@ app.post("/api/kicks/:userId", async (req, res) => {
 
   try {
     await pool.query(
-      "INSERT INTO kicks (user_id, session_id, kick_time) VALUES ($1, $2, CURRENT_TIMESTAMP)",
-      [userId, session_id],
+      "INSERT INTO kicks (user_id, session_id, kick_time, kick_count) VALUES ($1, $2, CURRENT_TIMESTAMP, $3)",
+      [userId, session_id, kick_count],
     );
     res.json({ message: "Kick recorded" });
   } catch (err) {
