@@ -279,31 +279,55 @@ app.post("/api/kicks/:userId", async (req, res) => {
   const { session_id, kick_count } = req.body;
 
   try {
+    // session_id can be null for initial kicks before session is created
     await pool.query(
-      "INSERT INTO kicks (user_id, session_id, kick_time, kick_count) VALUES ($1, $2, CURRENT_TIMESTAMP, $3)",
-      [userId, session_id, kick_count],
+      "INSERT INTO kicks (user_id, session_id, kick_time) VALUES ($1, $2, CURRENT_TIMESTAMP)",
+      [userId, session_id],
     );
     res.json({ message: "Kick recorded" });
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Server error");
+    console.error("Error recording kick:", err);
+    res
+      .status(500)
+      .json({ message: "Error recording kick", error: err.message });
   }
 });
 
 // Save kick session
 app.post("/api/kick-sessions/:userId", async (req, res) => {
   const { userId } = req.params;
-  const { session_id, total_kicks, duration_seconds } = req.body;
+  const { session_id, total_kicks, duration_seconds, session_date } = req.body;
 
   try {
-    const result = await pool.query(
-      "INSERT INTO kick_sessions (user_id, total_kicks, duration_seconds) VALUES ($1, $2, $3) RETURNING *",
-      [userId, total_kicks, duration_seconds],
-    );
-    res.json(result.rows[0]);
+    let result;
+
+    // If session_id is provided, it's a final update
+    if (session_id) {
+      result = await pool.query(
+        "UPDATE kick_sessions SET total_kicks = $1, duration_seconds = $2 WHERE id = $3 RETURNING *",
+        [total_kicks, duration_seconds, session_id],
+      );
+    } else {
+      // Otherwise, create a new session
+      result = await pool.query(
+        "INSERT INTO kick_sessions (user_id, session_date, total_kicks, duration_seconds) VALUES ($1, $2, 0, 0) RETURNING *",
+        [userId, session_date],
+      );
+    }
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Session not found" });
+    }
+
+    res.json({
+      message: "Session saved",
+      session_id: result.rows[0].id,
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).send("Server error");
+    console.error("Error saving kick session:", err);
+    res
+      .status(500)
+      .json({ message: "Error saving session", error: err.message });
   }
 });
 
