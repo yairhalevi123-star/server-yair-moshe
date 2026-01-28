@@ -8,6 +8,14 @@ import cors from "cors";
 import morgan from "morgan";
 import multer from "multer";
 import path from "path";
+import {
+  uploadDocument,
+  getUserDocuments,
+  deleteDocument,
+  viewDocument,
+  downloadDocument,
+  uploadMiddleware,
+} from "./uploadRoutes.js";
 
 config(); // טוען משתני סביבה מקובץ .env
 const app = express();
@@ -86,35 +94,28 @@ const storage = multer.diskStorage({
 const upload = multer({ storage: storage });
 
 // נתיב להעלאת קובץ
-app.post("/api/upload/:userId", upload.single("document"), async (req, res) => {
-  const { userId } = req.params;
-  const filePath = req.file.path;
-  const fileName = req.file.originalname;
-
-  try {
-    await pool.query(
-      "INSERT INTO user_documents (user_id, file_name, file_path) VALUES ($1, $2, $3)",
-      [userId, fileName, filePath],
-    );
-    res.json({ message: "הקובץ הועלה בהצלחה" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("שגיאה בשמירת הקובץ");
-  }
+app.post("/api/upload/:userId", uploadMiddleware, async (req, res) => {
+  uploadDocument(req, res, pool);
 });
 
 // נתיב לשליפת קבצים של משתמשת ספציפית (אבטחה!)
 app.get("/api/documents/:userId", async (req, res) => {
-  const { userId } = req.params;
-  try {
-    const result = await pool.query(
-      "SELECT * FROM user_documents WHERE user_id = $1",
-      [userId],
-    );
-    res.json(result.rows);
-  } catch (err) {
-    res.status(500).send("שגיאה בשליפת קבצים");
-  }
+  getUserDocuments(req, res, pool);
+});
+
+// View a document
+app.get("/api/documents/view/:documentId", async (req, res) => {
+  viewDocument(req, res, pool);
+});
+
+// Download a document
+app.get("/api/documents/download/:documentId", async (req, res) => {
+  downloadDocument(req, res, pool);
+});
+
+// Delete a document
+app.delete("/api/documents/:userId/:documentId", async (req, res) => {
+  deleteDocument(req, res, pool);
 });
 
 // נתיב להוספת לוג יומי
@@ -268,6 +269,125 @@ app.post("/api/register", async (req, res) => {
     await pool.query("ROLLBACK"); // ביטול הכל במקרה של שגיאה
     console.error(err.message);
     res.status(500).send("Server Error");
+  }
+});
+
+// ============= KICK COUNTER ENDPOINTS =============
+// Save a kick
+app.post("/api/kicks/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const { session_id, kick_count } = req.body;
+
+  try {
+    await pool.query(
+      "INSERT INTO kicks (user_id, session_id, kick_time) VALUES ($1, $2, CURRENT_TIMESTAMP)",
+      [userId, session_id],
+    );
+    res.json({ message: "Kick recorded" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server error");
+  }
+});
+
+// Save kick session
+app.post("/api/kick-sessions/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const { session_id, total_kicks, duration_seconds } = req.body;
+
+  try {
+    const result = await pool.query(
+      "INSERT INTO kick_sessions (user_id, total_kicks, duration_seconds) VALUES ($1, $2, $3) RETURNING *",
+      [userId, total_kicks, duration_seconds],
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server error");
+  }
+});
+
+// Get kick history
+app.get("/api/kicks/:userId", async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const result = await pool.query(
+      "SELECT * FROM kick_sessions WHERE user_id = $1 ORDER BY session_date DESC LIMIT 10",
+      [userId],
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server error");
+  }
+});
+
+// ============= WEIGHT TRACKING ENDPOINTS =============
+// Save weight
+app.post("/api/weight/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const { weight, date } = req.body;
+
+  try {
+    const result = await pool.query(
+      "INSERT INTO weight_tracking (user_id, weight, recorded_date) VALUES ($1, $2, $3) RETURNING *",
+      [userId, weight, new Date(date).toISOString().split("T")[0]],
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server error");
+  }
+});
+
+// Get weight history
+app.get("/api/weight/:userId", async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const result = await pool.query(
+      "SELECT weight, recorded_date as date FROM weight_tracking WHERE user_id = $1 ORDER BY recorded_date ASC",
+      [userId],
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server error");
+  }
+});
+
+// ============= CONTRACTIONS TRACKING ENDPOINTS =============
+// Save contraction
+app.post("/api/contractions/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const { start_time, duration_seconds, interval_minutes } = req.body;
+
+  try {
+    const result = await pool.query(
+      "INSERT INTO contractions (user_id, start_time, duration_seconds, interval_minutes) VALUES ($1, $2, $3, $4) RETURNING *",
+      [userId, start_time, duration_seconds, interval_minutes],
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server error");
+  }
+});
+
+// Get contractions history
+app.get("/api/contractions/:userId", async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const result = await pool.query(
+      "SELECT * FROM contractions WHERE user_id = $1 ORDER BY start_time DESC LIMIT 20",
+      [userId],
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send("Server error");
   }
 });
 
