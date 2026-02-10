@@ -88,8 +88,26 @@ CREATE TABLE contractions (
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Appointments Table
+CREATE TABLE appointments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    appointment_date DATE NOT NULL,
+    appointment_time TIME,
+    category VARCHAR(50), -- e.g., 'doctor', 'ultrasound', 'lab_test', 'other'
+    location VARCHAR(255),
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- Additional indexes
 CREATE INDEX idx_kick_sessions_user_id ON kick_sessions(user_id);
 CREATE INDEX idx_kicks_user_id ON kicks(user_id);
 CREATE INDEX idx_weight_tracking_user_id ON weight_tracking(user_id);
 CREATE INDEX idx_contractions_user_id ON contractions(user_id);
+CREATE INDEX idx_appointments_user_id ON appointments(user_id);
+CREATE INDEX idx_appointments_date ON appointments(appointment_date);

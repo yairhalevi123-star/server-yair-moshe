@@ -461,6 +461,159 @@ app.get("/api/contractions/:userId", async (req, res) => {
   }
 });
 
+// ============= APPOINTMENTS ENDPOINTS =============
+// Create appointment
+app.post("/api/appointments/:userId", async (req, res) => {
+  const { userId } = req.params;
+  const {
+    title,
+    description,
+    appointment_date,
+    appointment_time,
+    category,
+    location,
+    notes,
+  } = req.body;
+
+  try {
+    const result = await pool.query(
+      "INSERT INTO appointments (user_id, title, description, appointment_date, appointment_time, category, location, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *",
+      [
+        userId,
+        title,
+        description,
+        appointment_date,
+        appointment_time || null,
+        category,
+        location,
+        notes,
+      ],
+    );
+    res.json({
+      message: "Appointment created successfully",
+      appointment: result.rows[0],
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      message: "Error creating appointment",
+      error: err.message,
+    });
+  }
+});
+
+// Get all appointments for a user
+app.get("/api/appointments/:userId", async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const result = await pool.query(
+      "SELECT * FROM appointments WHERE user_id = $1 ORDER BY appointment_date ASC",
+      [userId],
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      message: "Error fetching appointments",
+      error: err.message,
+    });
+  }
+});
+
+// Get appointments for a specific month
+app.get("/api/appointments/:userId/month/:year/:month", async (req, res) => {
+  const { userId, year, month } = req.params;
+  const startDate = new Date(year, month - 1, 1).toISOString().split("T")[0];
+  const endDate = new Date(year, month, 0).toISOString().split("T")[0];
+
+  try {
+    const result = await pool.query(
+      "SELECT * FROM appointments WHERE user_id = $1 AND appointment_date BETWEEN $2 AND $3 ORDER BY appointment_date ASC",
+      [userId, startDate, endDate],
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      message: "Error fetching appointments",
+      error: err.message,
+    });
+  }
+});
+
+// Update appointment
+app.put("/api/appointments/:appointmentId", async (req, res) => {
+  const { appointmentId } = req.params;
+  const {
+    title,
+    description,
+    appointment_date,
+    appointment_time,
+    category,
+    location,
+    notes,
+  } = req.body;
+
+  try {
+    const result = await pool.query(
+      "UPDATE appointments SET title = $1, description = $2, appointment_date = $3, appointment_time = $4, category = $5, location = $6, notes = $7, updated_at = CURRENT_TIMESTAMP WHERE id = $8 RETURNING *",
+      [
+        title,
+        description,
+        appointment_date,
+        appointment_time,
+        category,
+        location,
+        notes,
+        appointmentId,
+      ],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Appointment not found" });
+    }
+
+    res.json({
+      message: "Appointment updated successfully",
+      appointment: result.rows[0],
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      message: "Error updating appointment",
+      error: err.message,
+    });
+  }
+});
+
+// Delete appointment
+app.delete("/api/appointments/:appointmentId", async (req, res) => {
+  const { appointmentId } = req.params;
+
+  try {
+    const result = await pool.query(
+      "DELETE FROM appointments WHERE id = $1 RETURNING *",
+      [appointmentId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Appointment not found" });
+    }
+
+    res.json({
+      message: "Appointment deleted successfully",
+      appointment: result.rows[0],
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      message: "Error deleting appointment",
+      error: err.message,
+    });
+  }
+});
+
 // Start server
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
