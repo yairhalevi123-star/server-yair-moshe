@@ -9,6 +9,7 @@ import morgan from "morgan";
 import multer from "multer";
 import OpenAI from "openai";
 import path from "path";
+import fs from "fs";
 import {
   uploadDocument,
   getUserDocuments,
@@ -68,7 +69,7 @@ app.get("/api/users", async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error(err);
-    res.status(500).send("Server error");
+    res.status(500).send("שגיאת שרת פנימית");
   }
 });
 // Route to get tests for a specific user
@@ -81,7 +82,7 @@ app.get("/api/user/tests/:id", async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error(err);
-    res.status(500).send("Server error");
+    res.status(500).send("שגיאת שרת פנימית");
   }
 });
 
@@ -140,7 +141,8 @@ app.post("/api/logs/:userId", async (req, res) => {
   }
 });
 app.post("/api/ai/chat", async (req, res) => {
-  const { messages, currentWeek, userName } = req.body;
+  const { messages, currentWeek, userName, userId } = req.body;
+  const { pageData, documents } = req.body;
 
   // 1. Initial Filtering
   const forbiddenPatterns = [/הימורים/i, /קריפטו/i, /פורנו/i];
@@ -154,26 +156,121 @@ app.post("/api/ai/chat", async (req, res) => {
   }
 
   try {
-    const response = await groq.chat.completions.create({
-      model: "llama-3.1-8b-instant",
-      messages: [
-        {
-          role: "system",
-          content: `
+    // Build a richer system prompt that includes pageData and document list when provided
+    let extraContext = "";
+    if (pageData) {
+      extraContext += `
+        נתוני המשתמש: שם=${pageData.name}, שבוע=${pageData.currentWeek}, ימים לתוך השבוע=${pageData.daysIntoWeek}.
+      `;
+    }
+
+    // If we have a userId, fetch DB information to include
+    if (userId) {
+      try {
+        // fetch scheduled tests
+        const testsRes = await pool.query(
+          "SELECT title, is_completed, target_week FROM tests WHERE user_id = $1 ORDER BY target_week ASC LIMIT 10",
+          [userId],
+        );
+        if (testsRes.rows.length > 0) {
+          const testsSummary = testsRes.rows
+            .map(
+              (t) =>
+                `${t.title} (שבוע ${t.target_week}) - ${t.is_completed ? "בוצע" : "ממתין"}`,
+            )
+            .join("; ");
+          extraContext += `בדיקות מתוזמנות: ${testsSummary}. `;
+        }
+
+        // fetch upcoming appointments
+        const apptsRes = await pool.query(
+          "SELECT title, appointment_date, appointment_time FROM appointments WHERE user_id = $1 AND appointment_date >= CURRENT_DATE ORDER BY appointment_date ASC LIMIT 5",
+          [userId],
+        );
+        if (apptsRes.rows.length > 0) {
+          const apptSummary = apptsRes.rows
+            .map(
+              (a) =>
+                `${a.title} ב-${new Date(a.appointment_date).toLocaleDateString()}${a.appointment_time ? ` בשעה ${a.appointment_time}` : ""}`,
+            )
+            .join("; ");
+          extraContext += `פגישות קרובות: ${apptSummary}. `;
+        }
+
+        // fetch recent weight logs
+        const weightsRes = await pool.query(
+          "SELECT weight, recorded_date as date FROM weight_tracking WHERE user_id = $1 ORDER BY recorded_date DESC LIMIT 5",
+          [userId],
+        );
+        if (weightsRes.rows.length > 0) {
+          const weightsSummary = weightsRes.rows
+            .map(
+              (w) =>
+                `${w.weight} ק"ג ב-${new Date(w.date).toLocaleDateString()}`,
+            )
+            .join("; ");
+          extraContext += `נתוני משקל אחרונים: ${weightsSummary}. `;
+        }
+
+        // If client sent selected document ids, attempt to fetch small text contents
+        if (documents && Array.isArray(documents) && documents.length > 0) {
+          const docIds = documents.map((d) => d.id);
+          const docsRes = await pool.query(
+            "SELECT id, file_name, file_path FROM user_documents WHERE id = ANY($1) AND user_id = $2",
+            [docIds, userId],
+          );
+
+          if (docsRes.rows.length > 0) {
+            const docSummaries = [];
+            for (const doc of docsRes.rows) {
+              let note = doc.file_name;
+              try {
+                const absolute = path.isAbsolute(doc.file_path)
+                  ? doc.file_path
+                  : path.join(process.cwd(), doc.file_path);
+                const ext = path.extname(absolute).toLowerCase();
+                if ([".txt", ".md", ".json", ".csv"].includes(ext)) {
+                  const content = fs.readFileSync(absolute, "utf8");
+                  const excerpt = content.slice(0, 1000).replace(/\s+/g, " ");
+                  note += ` - תוכן (קיצור): ${excerpt}`;
+                } else {
+                  note +=
+                    " - סוג קובץ לא טקסטואלי, יש לבדוק את הקובץ למידע מפורט";
+                }
+              } catch (err) {
+                console.error("Error reading document file:", err);
+                note += " - לא ניתן לגשת לתוכן הקובץ";
+              }
+              docSummaries.push(note);
+            }
+            extraContext += `מסמכים נבחרים: ${docSummaries.join("; ")}. `;
+          }
+        }
+      } catch (err) {
+        console.error("DB fetch for AI chat failed:", err);
+      }
+    } else {
+      if (documents && Array.isArray(documents) && documents.length > 0) {
+        const docNames = documents.map((d) => d.name).join(", ");
+        extraContext += ` רשימת מסמכים נבחרים: ${docNames}. `;
+      }
+    }
+
+    const systemContent = `
             אתה עוזר מקצועי המלווה את ${userName} הנמצאת בשבוע ${currentWeek}.
+            ${extraContext}
             חוקים:
             - ענה אך ורק על נושאי הריון, לידה ובריאות האישה.
-            - אל תחזור על המידע שהמשתמשת ציינה. 
-            - ענה ישירות לעניין בלי הקדמות (בלי "שלום", בלי "זו שאלה טובה").
-            - הגבלת אורך: מקסימום 2-3 משפטים קצרים.
-            - אם השאלה לא קשור להריון, ענה: "סליחה, אני מתמחה רק בליווי הריון ולידה."
-            - דגש: אם יש סימני אזהרה (דימום/כאב חזק), הנחה לפנות מיד לרופא.
-          `,
-        },
-        ...messages,
-      ],
-      temperature: 0.3, // Lower temperature reduces "hallucinations" and repetition
-      max_tokens: 150, // Forces the AI to be brief
+            - אל תחזור על המידע שהמשתמשת ציינה.
+            - ענה ישירות ובקצרה (2-3 משפטים) עם המלצות ברורות לפעולה בהתאם לנתונים שסופקו.
+            - אם בנתונים או במסמכים מופיעים סימני אזהרה (דימום, ירידת מים, כאב חזק), הנחה לפנות מיד למוקד רפואי או מיון נשים.
+          `;
+
+    const response = await groq.chat.completions.create({
+      model: "llama-3.1-8b-instant",
+      messages: [{ role: "system", content: systemContent }, ...messages],
+      temperature: 0.3,
+      max_tokens: 200,
     });
 
     res.json({ reply: response.choices[0].message.content });
@@ -308,13 +405,13 @@ app.post("/api/register", async (req, res) => {
     await pool.query("COMMIT");
 
     res.json({
-      message: "User registered and plan created!",
+      message: "המשתמש נרשם והתוכנית נוצרה!",
       user: newUser.rows[0],
     });
   } catch (err) {
     await pool.query("ROLLBACK"); // ביטול הכל במקרה של שגיאה
     console.error(err.message);
-    res.status(500).send("Server Error");
+    res.status(500).send("שגיאת שרת פנימית");
   }
 });
 
@@ -330,12 +427,12 @@ app.post("/api/kicks/:userId", async (req, res) => {
       "INSERT INTO kicks (user_id, session_id, kick_time) VALUES ($1, $2, CURRENT_TIMESTAMP)",
       [userId, session_id],
     );
-    res.json({ message: "Kick recorded" });
+    res.json({ message: "הבעיטה נשמרה" });
   } catch (err) {
     console.error("Error recording kick:", err);
     res
       .status(500)
-      .json({ message: "Error recording kick", error: err.message });
+      .json({ message: "שגיאה בשמירת הבעיטה", error: err.message });
   }
 });
 
@@ -362,18 +459,16 @@ app.post("/api/kick-sessions/:userId", async (req, res) => {
     }
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Session not found" });
+      return res.status(404).json({ message: "הסשן לא נמצא" });
     }
 
     res.json({
-      message: "Session saved",
+      message: "הסשן נשמר",
       session_id: result.rows[0].id,
     });
   } catch (err) {
     console.error("Error saving kick session:", err);
-    res
-      .status(500)
-      .json({ message: "Error saving session", error: err.message });
+    res.status(500).json({ message: "שגיאה בשמירת הסשן", error: err.message });
   }
 });
 
@@ -389,7 +484,7 @@ app.get("/api/kicks/:userId", async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error(err);
-    res.status(500).send("Server error");
+    res.status(500).send("שגיאת שרת פנימית");
   }
 });
 
@@ -490,13 +585,13 @@ app.post("/api/appointments/:userId", async (req, res) => {
       ],
     );
     res.json({
-      message: "Appointment created successfully",
+      message: "הפגישה נוצרה בהצלחה",
       appointment: result.rows[0],
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({
-      message: "Error creating appointment",
+      message: "שגיאה ביצירת הפגישה",
       error: err.message,
     });
   }
@@ -515,7 +610,7 @@ app.get("/api/appointments/:userId", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({
-      message: "Error fetching appointments",
+      message: "שגיאה בשליפת הפגישות",
       error: err.message,
     });
   }
@@ -536,7 +631,7 @@ app.get("/api/appointments/:userId/month/:year/:month", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({
-      message: "Error fetching appointments",
+      message: "שגיאה בשליפת הפגישות",
       error: err.message,
     });
   }
@@ -571,17 +666,17 @@ app.put("/api/appointments/:appointmentId", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Appointment not found" });
+      return res.status(404).json({ message: "הפגישה לא נמצאה" });
     }
 
     res.json({
-      message: "Appointment updated successfully",
+      message: "הפגישה עודכנה בהצלחה",
       appointment: result.rows[0],
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({
-      message: "Error updating appointment",
+      message: "שגיאה בעדכון הפגישה",
       error: err.message,
     });
   }
@@ -598,17 +693,17 @@ app.delete("/api/appointments/:appointmentId", async (req, res) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Appointment not found" });
+      return res.status(404).json({ message: "הפגישה לא נמצאה" });
     }
 
     res.json({
-      message: "Appointment deleted successfully",
+      message: "הפגישה נמחקה בהצלחה",
       appointment: result.rows[0],
     });
   } catch (err) {
     console.error(err);
     res.status(500).json({
-      message: "Error deleting appointment",
+      message: "שגיאה במחיקת הפגישה",
       error: err.message,
     });
   }

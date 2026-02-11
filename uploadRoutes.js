@@ -14,7 +14,7 @@ export const uploadDocument = async (req, res, pool) => {
   const { userId } = req.params;
 
   if (!req.file) {
-    return res.status(400).json({ message: "No file provided" });
+    return res.status(400).json({ message: "לא נבחר קובץ" });
   }
 
   const filePath = req.file.path;
@@ -27,12 +27,12 @@ export const uploadDocument = async (req, res, pool) => {
     );
 
     res.status(201).json({
-      message: "File uploaded successfully",
+      message: "הקובץ הועלה בהצלחה",
       document: result.rows[0],
     });
   } catch (err) {
     console.error("Upload error:", err);
-    res.status(500).json({ message: "Error saving file to database" });
+    res.status(500).json({ message: "שגיאה בשמירת הקובץ במסד הנתונים" });
   }
 };
 
@@ -48,7 +48,7 @@ export const getUserDocuments = async (req, res, pool) => {
     res.json(result.rows);
   } catch (err) {
     console.error("Fetch error:", err);
-    res.status(500).json({ message: "Error fetching documents" });
+    res.status(500).json({ message: "שגיאה בשליפת המסמכים" });
   }
 };
 
@@ -63,16 +63,16 @@ export const deleteDocument = async (req, res, pool) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Document not found" });
+      return res.status(404).json({ message: "המסמך לא נמצא" });
     }
 
     // Optional: Delete file from disk
     // fs.unlinkSync(result.rows[0].file_path);
 
-    res.json({ message: "Document deleted successfully" });
+    res.json({ message: "המסמך נמחק בהצלחה" });
   } catch (err) {
     console.error("Delete error:", err);
-    res.status(500).json({ message: "Error deleting document" });
+    res.status(500).json({ message: "שגיאה במחיקת המסמך" });
   }
 };
 
@@ -87,7 +87,7 @@ export const viewDocument = async (req, res, pool) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Document not found" });
+      return res.status(404).json({ message: "המסמך לא נמצא" });
     }
 
     const document = result.rows[0];
@@ -99,13 +99,13 @@ export const viewDocument = async (req, res, pool) => {
     }
 
     if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ message: "File not found on server" });
+      return res.status(404).json({ message: "הקובץ לא נמצא בשרת" });
     }
 
     res.sendFile(filePath);
   } catch (err) {
     console.error("View error:", err);
-    res.status(500).json({ message: "Error viewing document" });
+    res.status(500).json({ message: "שגיאה בצפייה במסמך" });
   }
 };
 
@@ -120,7 +120,7 @@ export const downloadDocument = async (req, res, pool) => {
     );
 
     if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Document not found" });
+      return res.status(404).json({ message: "המסמך לא נמצא" });
     }
 
     const document = result.rows[0];
@@ -132,13 +132,13 @@ export const downloadDocument = async (req, res, pool) => {
     }
 
     if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ message: "File not found on server" });
+      return res.status(404).json({ message: "הקובץ לא נמצא בשרת" });
     }
 
     res.download(filePath, document.file_name);
   } catch (err) {
     console.error("Download error:", err);
-    res.status(500).json({ message: "Error downloading document" });
+    res.status(500).json({ message: "שגיאה בהורדת המסמך" });
   }
 };
 
