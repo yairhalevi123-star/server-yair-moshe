@@ -18,6 +18,7 @@ import {
   downloadDocument,
   uploadMiddleware,
 } from "./uploadRoutes.js";
+import notificationRoutes from "./routes/notificationRoutes.js";
 
 config(); // טוען משתני סביבה מקובץ .env
 const app = express();
@@ -61,6 +62,9 @@ const groq = new OpenAI({
 // Middleware
 app.use(express.json());
 app.use(morgan("dev"));
+
+// Routes
+app.use("/api/notifications", notificationRoutes);
 
 // Example route to get users
 app.get("/api/users", async (req, res) => {
