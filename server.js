@@ -1,6 +1,7 @@
-// ייבוא קבצים וספריות נדרשות
-// import "dotenv/config";
-import { config } from "dotenv";
+// 1. טעינת dotenv בשורה הראשונה ממש ובצורה מיידית
+import "dotenv/config";
+
+// 2. עכשיו ייבוא שאר הספריות
 import express from "express";
 import { Pool } from "pg";
 import bcrypt from "bcrypt";
@@ -10,6 +11,8 @@ import multer from "multer";
 import OpenAI from "openai";
 import path from "path";
 import fs from "fs";
+
+// 3. ייבוא ה-Routes (עכשיו הם יראו את ה-env)
 import {
   uploadDocument,
   getUserDocuments,
@@ -20,7 +23,7 @@ import {
 } from "./uploadRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 
-config(); // טוען משתני סביבה מקובץ .env
+// אין צורך לקרוא ל-config() יותר כי import "dotenv/config" כבר עשה זאת
 const app = express();
 // אפשרות CORS לשרת Express
 app.use(cors());
@@ -263,13 +266,17 @@ app.post("/api/ai/chat", async (req, res) => {
     const systemContent = `
             אתה עוזר מקצועי המלווה את ${userName} הנמצאת בשבוע ${currentWeek}.
             ${extraContext}
-            חוקים:
-            - ענה אך ורק על נושאי הריון, לידה ובריאות האישה.
-            - אל תחזור על המידע שהמשתמשת ציינה.
-            - ענה ישירות ובקצרה (2-3 משפטים) עם המלצות ברורות לפעולה בהתאם לנתונים שסופקו.
-            - אם בנתונים או במסמכים מופיעים סימני אזהרה (דימום, ירידת מים, כאב חזק), הנחה לפנות מיד למוקד רפואי או מיון נשים.
+            
+            חוקים קשיחים:
+            1. ענה אך ורק על נושאי הריון, לידה ובריאות האישה.
+            2. בנושאי בטיחות מזון (מה מותר לאכול): 
+               - ענה תמיד בפורמט: [אייקון] שם המאכל: הסבר קצר.
+               - אייקונים: ✅ (מותר), ⚠️ (בזהירות/מוגבל), ❌ (אסור).
+               - אם המאכל אסור (כמו בשר נא או סושי דג נא), הסבר את הסיכון (למשל: ליסטריה או סלמונלה).
+            3. ענה ישירות ובקצרה (עד 3 משפטים).
+            4. אם המשתמשת שואלת על תסמינים מדאיגים (דימום, כאב חזק, ירידת מים), הנחה לפנות מיד למוקד רפואי או מיון נשים.
+            5. שמור על טון אמפתי אך מקצועי.
           `;
-
     const response = await groq.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: [{ role: "system", content: systemContent }, ...messages],
@@ -511,12 +518,35 @@ app.post("/api/weight/:userId", async (req, res) => {
 });
 
 // Get weight history
+// app.get("/api/weight/:userId", async (req, res) => {
+//   const { userId } = req.params;
+
+//   try {
+//     const result = await pool.query(
+//       "SELECT weight, recorded_date as date FROM weight_tracking WHERE user_id = $1 ORDER BY recorded_date ASC",
+//       [userId],
+//     );
+//     res.json(result.rows);
+//   } catch (err) {
+//     console.error(err);
+//     res.status(500).send("Server error");
+//   }
+// });
+// Get weight history - מעודכן עם חישוב שבועות אוטומטי
 app.get("/api/weight/:userId", async (req, res) => {
   const { userId } = req.params;
 
   try {
     const result = await pool.query(
-      "SELECT weight, recorded_date as date FROM weight_tracking WHERE user_id = $1 ORDER BY recorded_date ASC",
+      `SELECT 
+        w.weight, 
+        w.recorded_date as date,
+        -- חישוב השבוע: הפרש הימים בין השקילה לווסת האחרונה חלקי 7
+        FLOOR(EXTRACT(DAY FROM (w.recorded_date::timestamp - u.last_period_date::timestamp)) / 7) as week
+      FROM weight_tracking w
+      JOIN users u ON w.user_id = u.id
+      WHERE w.user_id = $1 
+      ORDER BY w.recorded_date ASC`,
       [userId],
     );
     res.json(result.rows);
