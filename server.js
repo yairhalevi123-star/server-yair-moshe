@@ -22,6 +22,7 @@ import {
   uploadMiddleware,
 } from "./uploadRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
+import hospitalBagRoutes, { setPool as setHospitalBagPool } from "./routes/hospitalBagRoutes.js";
 
 // אין צורך לקרוא ל-config() יותר כי import "dotenv/config" כבר עשה זאת
 const app = express();
@@ -66,8 +67,12 @@ const groq = new OpenAI({
 app.use(express.json());
 app.use(morgan("dev"));
 
+// Set pool for hospital bag routes
+setHospitalBagPool(pool);
+
 // Routes
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/hospital-bag", hospitalBagRoutes);
 
 // Example route to get users
 app.get("/api/users", async (req, res) => {

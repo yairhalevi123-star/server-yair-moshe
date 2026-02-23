@@ -1,7 +1,7 @@
 -- Create push_subscriptions table for storing user notification subscriptions
 CREATE TABLE IF NOT EXISTS push_subscriptions (
   id SERIAL PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   endpoint TEXT NOT NULL UNIQUE,
   keys JSONB NOT NULL,
   created_at TIMESTAMP DEFAULT NOW(),

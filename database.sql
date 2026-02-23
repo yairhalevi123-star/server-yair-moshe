@@ -111,3 +111,31 @@ CREATE INDEX idx_weight_tracking_user_id ON weight_tracking(user_id);
 CREATE INDEX idx_contractions_user_id ON contractions(user_id);
 CREATE INDEX idx_appointments_user_id ON appointments(user_id);
 CREATE INDEX idx_appointments_date ON appointments(appointment_date);
+
+-- Push subscriptions table for web push notifications
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id SERIAL PRIMARY KEY,
+    user_id UUID NOT NULL, -- וודא שזה תואם לסוג הנתונים של ה-ID בטבלת ה-users שלך
+    endpoint TEXT NOT NULL UNIQUE,
+    keys JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id ON push_subscriptions(user_id);
+
+-- Hospital Bag Items Table
+CREATE TABLE IF NOT EXISTS hospital_bag_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    text VARCHAR(255) NOT NULL,
+    category VARCHAR(50) NOT NULL,
+    checked BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_hospital_bag_user_id ON hospital_bag_items(user_id);
+CREATE INDEX IF NOT EXISTS idx_hospital_bag_category ON hospital_bag_items(category);

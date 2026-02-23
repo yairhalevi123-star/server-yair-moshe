@@ -377,24 +377,155 @@ router.post("/send", async (req, res) => {
 });
 
 /**
- * עזרים לשליחת תזכורות ספציפיות
- * משתמשים ב-logic הפנימי במקום ב-router.handle
+ * DELETE /api/notifications/unsubscribe
+ * הסרת מנוי מהמסד
  */
-const sendInternalNotification = async (userId, payloadData) => {
-  // לוגיקה פנימית לשליחה (ניתן לקרוא לה מה-routes למטה)
-  // הערה: עדיף להוציא את לוגיקת השליחה לפונקציה נפרדת כדי למנוע חזרתיות
-};
+router.delete("/unsubscribe", async (req, res) => {
+  try {
+    const { endpoint, userId } = req.body;
 
-router.post("/send-checkup-reminder", async (req, res) => {
-  const { userId, appointmentDetails } = req.body;
-  req.body = {
-    userId,
-    title: "🏥 תזכורת לבדיקה",
-    body: `יש לך בדיקה מחר בשעה ${appointmentDetails?.time || "לא צוין"}`,
-    data: { type: "checkup", url: "/dashboard#appointments" },
-  };
-  // קריאה ישירה לפונקציית השליחה במקום router.handle (שיכול לגרום לבעיות)
-  return router.handle(req, res);
+    if (!endpoint && !userId) {
+      return res.status(400).json({ error: "endpoint or userId is required" });
+    }
+
+    let query, values;
+
+    if (endpoint) {
+      query = "DELETE FROM push_subscriptions WHERE endpoint = $1 RETURNING id";
+      values = [endpoint];
+    } else {
+      query = "DELETE FROM push_subscriptions WHERE user_id = $1 RETURNING id";
+      values = [userId];
+    }
+
+    const result = await pool.query(query, values);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Subscription not found" });
+    }
+
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("Error removing subscription:", error);
+    res.status(500).json({ error: "Failed to remove subscription" });
+  }
 });
 
+/**
+ * POST /api/notifications/send-checkup-reminder
+ * שליחת תזכורת לבדיקה
+ */
+router.post("/send-checkup-reminder", async (req, res) => {
+  try {
+    const { userId, appointmentDetails } = req.body;
+
+    const payload = {
+      userId,
+      title: "🏥 תזכורת לבדיקה",
+      body: `יש לך בדיקה מחר בשעה ${appointmentDetails?.time || "לא צוין"}`,
+      icon: "/logo192.png",
+      data: { type: "checkup", url: "/dashboard#appointments" },
+    };
+
+    const result = await pool.query(
+      "SELECT endpoint, keys FROM push_subscriptions WHERE user_id = $1",
+      [userId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "No subscriptions found" });
+    }
+
+    const sendPromises = result.rows.map((sub) => {
+      const pushSubscription = {
+        endpoint: sub.endpoint,
+        keys: typeof sub.keys === "string" ? JSON.parse(sub.keys) : sub.keys,
+      };
+      return webpush
+        .sendNotification(pushSubscription, JSON.stringify(payload))
+        .catch((err) => {
+          if (err.statusCode === 410 || err.statusCode === 404) {
+            pool.query("DELETE FROM push_subscriptions WHERE endpoint = $1", [
+              sub.endpoint,
+            ]);
+          }
+        });
+    });
+
+    await Promise.all(sendPromises);
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("Error sending checkup reminder:", error);
+    res.status(500).json({ error: "Failed to send checkup reminder" });
+  }
+});
+
+/**
+ * POST /api/notifications/send-water-reminder
+ * שליחת תזכורת לשתיית מים
+ */
+router.post("/send-water-reminder", async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    const payload = {
+      userId,
+      title: "💧 תזכורת לשתות מים",
+      body: "הגיע הזמן לשתות כוס מים! שמירה על לחות חשובה להריון בריא",
+      icon: "/logo192.png",
+      data: { type: "water", url: "/dashboard#daily-log" },
+    };
+
+    const result = await pool.query(
+      "SELECT endpoint, keys FROM push_subscriptions WHERE user_id = $1",
+      [userId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "No subscriptions found" });
+    }
+
+    const sendPromises = result.rows.map((sub) => {
+      const pushSubscription = {
+        endpoint: sub.endpoint,
+        keys: typeof sub.keys === "string" ? JSON.parse(sub.keys) : sub.keys,
+      };
+      return webpush
+        .sendNotification(pushSubscription, JSON.stringify(payload))
+        .catch((err) => {
+          if (err.statusCode === 410 || err.statusCode === 404) {
+            pool.query("DELETE FROM push_subscriptions WHERE endpoint = $1", [
+              sub.endpoint,
+            ]);
+          }
+        });
+    });
+
+    await Promise.all(sendPromises);
+    res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("Error sending water reminder:", error);
+    res.status(500).json({ error: "Failed to send water reminder" });
+  }
+});
+/**
+ * POST /api/notifications/send-test
+ * ראוט ייעודי לבדיקה מהירה מהפרונט-אנד
+ */
+router.post("/send-test", async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: "userId is required" });
+
+  // אנחנו פשוט "מזייפים" קריאה לראוט הגנרי או משתמשים בלוגיקה שלו
+  req.body = {
+    userId,
+    title: "🔔 בדיקת התראות",
+    body: "הנה התראת הניסיון שלך! המערכת עובדת בהצלחה.",
+    icon: "/logo192.png",
+    data: { type: "test" },
+  };
+
+  // מריצים את הלוגיקה של הראוט הקיים
+  return router.handle(req, res);
+});
 export default router;
