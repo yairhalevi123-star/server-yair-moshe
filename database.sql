@@ -1,4 +1,5 @@
 -- 1. ניקוי שולחן (כדי למנוע התנגשויות)
+DROP TABLE IF EXISTS user_settings CASCADE;
 DROP TABLE IF EXISTS user_documents CASCADE;
 DROP TABLE IF EXISTS tests CASCADE;
 DROP TABLE IF EXISTS logs CASCADE;
@@ -17,6 +18,21 @@ CREATE TABLE users (
     due_date DATE,
     created_at TIMESTAMP DEFAULT NOW()
 );
+
+-- User Settings Table
+CREATE TABLE user_settings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID UNIQUE NOT NULL,
+    pregnancy_type VARCHAR(50) DEFAULT 'single', -- 'single' or 'twins'
+    language VARCHAR(10) DEFAULT 'he', -- 'he' for Hebrew, 'en' for English
+    dark_mode BOOLEAN DEFAULT FALSE,
+    water_reminder_interval INTEGER DEFAULT 60, -- minutes
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_user_settings_user_id ON user_settings(user_id);
 
 CREATE TABLE logs (
     id SERIAL PRIMARY KEY,
@@ -51,8 +67,12 @@ CREATE TABLE kick_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
     session_date DATE DEFAULT CURRENT_DATE,
+    start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    end_time TIMESTAMP,
     total_kicks INTEGER NOT NULL,
     duration_seconds INTEGER,
+    intensity INTEGER CHECK (intensity >= 1 AND intensity <= 5),
+    session_notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -111,6 +131,8 @@ CREATE INDEX idx_weight_tracking_user_id ON weight_tracking(user_id);
 CREATE INDEX idx_contractions_user_id ON contractions(user_id);
 CREATE INDEX idx_appointments_user_id ON appointments(user_id);
 CREATE INDEX idx_appointments_date ON appointments(appointment_date);
+CREATE INDEX idx_logs_user_id ON logs(user_id);
+CREATE INDEX idx_logs_date ON logs(log_date);
 
 -- Push subscriptions table for web push notifications
 CREATE TABLE IF NOT EXISTS push_subscriptions (

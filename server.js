@@ -22,7 +22,14 @@ import {
   uploadMiddleware,
 } from "./uploadRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
-import hospitalBagRoutes, { setPool as setHospitalBagPool } from "./routes/hospitalBagRoutes.js";
+import hospitalBagRoutes, {
+  setPool as setHospitalBagPool,
+} from "./routes/hospitalBagRoutes.js";
+import logsRoutes, { setPool as setLogsPool } from "./routes/logsRoutes.js";
+import kickRoutes, { setPool as setKickPool } from "./routes/kickRoutes.js";
+import settingsRoutes, {
+  setPool as setSettingsPool,
+} from "./routes/settingsRoutes.js";
 
 // אין צורך לקרוא ל-config() יותר כי import "dotenv/config" כבר עשה זאת
 const app = express();
@@ -67,12 +74,18 @@ const groq = new OpenAI({
 app.use(express.json());
 app.use(morgan("dev"));
 
-// Set pool for hospital bag routes
+// Set pool for all route modules
 setHospitalBagPool(pool);
+setLogsPool(pool);
+setKickPool(pool);
+setSettingsPool(pool);
 
 // Routes
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/hospital-bag", hospitalBagRoutes);
+app.use("/api/logs-history", logsRoutes);
+app.use("/api/kick-sessions", kickRoutes);
+app.use("/api/settings", settingsRoutes);
 
 // Example route to get users
 app.get("/api/users", async (req, res) => {
